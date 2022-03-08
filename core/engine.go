@@ -108,7 +108,16 @@ func NewEngine(
 		e.Stop()
 	})
 
-	return e, nil
+	// TODO: refactor out of here when https://github.com/grafana/k6/issues/1321
+	// lands and there is a better way to enable a metric with tag
+	if e.options.SystemTags.Has(stats.TagExpectedResponse) {
+		_, err := e.getOrInitPotentialSubmetric("http_req_duration{expected_response:true}")
+		if err != nil {
+			return err // shouldn't happen, but ¯\_(ツ)_/¯
+		}
+	}
+
+	return nil
 }
 
 // Init is used to initialize the execution scheduler and all metrics processing
