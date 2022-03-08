@@ -90,25 +90,25 @@ func (r *Registry) Get(name string) *Metric {
 	return r.metrics[name]
 }
 
-func newMetric(name string, mt stats.MetricType, vt ...stats.ValueType) *stats.Metric {
-	valueType := stats.Default
+func newMetric(name string, mt stats.MetricType, vt ...ValueType) *Metric {
+	valueType := Default
 	if len(vt) > 0 {
 		valueType = vt[0]
 	}
-	var sink stats.Sink
+	var sink Sink
 	switch mt {
-	case stats.Counter:
-		sink = &stats.CounterSink{}
-	case stats.Gauge:
-		sink = &stats.GaugeSink{}
-	case stats.Trend:
-		sink = &stats.TrendSink{}
-	case stats.Rate:
-		sink = &stats.RateSink{}
+	case Counter:
+		sink = &CounterSink{}
+	case Gauge:
+		sink = &GaugeSink{}
+	case Trend:
+		sink = &TrendSink{}
+	case Rate:
+		sink = &RateSink{}
 	default:
 		return nil
 	}
-	return &stats.Metric{
+	return &Metric{
 		Name:     name,
 		Type:     mt,
 		Contains: valueType,
