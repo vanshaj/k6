@@ -40,6 +40,7 @@ func newMetric(name string, mt MetricType, vt ...ValueType) *Metric {
 	if len(vt) > 0 {
 		valueType = vt[0]
 	}
+	
 	var sink Sink
 	switch mt {
 	case Counter:
