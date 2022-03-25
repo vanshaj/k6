@@ -89,29 +89,3 @@ func (r *Registry) MustNewMetric(name string, typ MetricType, t ...ValueType) *M
 func (r *Registry) Get(name string) *Metric {
 	return r.metrics[name]
 }
-
-func newMetric(name string, mt MetricType, vt ...ValueType) *Metric {
-	valueType := Default
-	if len(vt) > 0 {
-		valueType = vt[0]
-	}
-	var sink Sink
-	switch mt {
-	case Counter:
-		sink = &CounterSink{}
-	case Gauge:
-		sink = &GaugeSink{}
-	case Trend:
-		sink = &TrendSink{}
-	case Rate:
-		sink = &RateSink{}
-	default:
-		return nil
-	}
-	return &Metric{
-		Name:     name,
-		Type:     mt,
-		Contains: valueType,
-		Sink:     sink,
-	}
-}
