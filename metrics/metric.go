@@ -124,6 +124,24 @@ func (m *Metric) AddSubmetric(keyValues string) (*Submetric, error) {
 	return subMetric, nil
 }
 
+// FindSubmetric looks for a submetric with tags matching the supplied
+// keyValues, in the metric's collection.
+//
+// The keyValues input parameter is a sequence of comma separated
+// key:value pairs matching the tags of the sought Submetric.
+//
+// If found, the first returned value will be the index of the found
+// submetric in the Metric's Submetrics collection. The second
+// return value indicates whether or not the submetric was found.
+func (m *Metric) FindSubmetric(keyValues string) (int, bool) {
+	for idx, sm := range m.Submetrics {
+		if sm.Name == m.Name+"{"+keyValues+"}" {
+			return idx, true
+		}
+	}
+
+	return -1, false
+}
 
 // ErrMetricNameParsing indicates parsing a metric name failed
 var ErrMetricNameParsing = errors.New("parsing metric name failed")
