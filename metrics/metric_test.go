@@ -66,3 +66,104 @@ func TestAddSubmetric(t *testing.T) {
 		})
 	}
 }
+
+func TestParseMetricName(t *testing.T) {
+	// TODO: verify we get an ErrMetricNameParsing
+	t.Parallel()
+
+	tests := []struct {
+		name                 string
+		metricNameExpression string
+		wantMetricName       string
+		wantTags             []string
+		wantErr              bool
+	}{
+		{
+			name:                 "metric name without tags",
+			metricNameExpression: "test_metric",
+			wantMetricName:       "test_metric",
+			wantTags:             nil,
+			wantErr:              false,
+		},
+		{
+			name:                 "metric name with single tag",
+			metricNameExpression: "test_metric{abc:123}",
+			wantMetricName:       "test_metric",
+			wantTags:             []string{"abc:123"},
+			wantErr:              false,
+		},
+		{
+			name:                 "metric name with multiple tags",
+			metricNameExpression: "test_metric{abc:123,easyas:doremi}",
+			wantMetricName:       "test_metric",
+			wantTags:             []string{"abc:123", "easyas:doremi"},
+			wantErr:              false,
+		},
+		{
+			name:                 "metric name with multiple spaced tags",
+			metricNameExpression: "test_metric{abc:123, easyas:doremi}",
+			wantMetricName:       "test_metric",
+			wantTags:             []string{"abc:123", "easyas:doremi"},
+			wantErr:              false,
+		},
+		{
+			name:                 "metric name with group tag",
+			metricNameExpression: "test_metric{group:::mygroup}",
+			wantMetricName:       "test_metric",
+			wantTags:             []string{"group:::mygroup"},
+			wantErr:              false,
+		},
+		{
+			name:                 "metric name with tag definition missing `:value`",
+			metricNameExpression: "test_metric{easyas}",
+			wantMetricName:       "",
+			wantTags:             nil,
+			wantErr:              true,
+		},
+		{
+			name:                 "metric name with tag definition missing value",
+			metricNameExpression: "test_metric{easyas:}",
+			wantMetricName:       "",
+			wantTags:             nil,
+			wantErr:              true,
+		},
+		{
+			name:                 "metric name with mixed valid and invalid tag definitions",
+			metricNameExpression: "test_metric{abc:123,easyas:}",
+			wantMetricName:       "",
+			wantTags:             nil,
+			wantErr:              true,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			gotMetricName, gotTags, gotErr := ParseMetricName(tt.metricNameExpression)
+
+			assert.Equal(t,
+				gotErr != nil, tt.wantErr,
+				"ParseMetricName() error = %v, wantErr %v", gotErr, tt.wantErr,
+			)
+
+			if gotErr != nil {
+				assert.ErrorIs(t,
+					gotErr, ErrMetricNameParsing,
+					"ParseMetricName() error chain should contain ErrMetricNameParsing",
+				)
+			}
+
+			assert.Equal(t,
+				gotMetricName, tt.wantMetricName,
+				"ParseMetricName() gotMetricName = %v, want %v", gotMetricName, tt.wantMetricName,
+			)
+
+			assert.Equal(t,
+				gotTags, tt.wantTags,
+				"ParseMetricName() gotTags = %v, want %v", gotTags, tt.wantTags,
+			)
+		})
+	}
+}
