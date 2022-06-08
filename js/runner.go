@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja/unistring"
 	"github.com/oxtoacart/bpool"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
@@ -732,7 +733,9 @@ func (u *ActiveVU) RunOnce() error {
 		}
 	}
 
-	fn, ok := u.exports[u.Exec]
+	// fmt.Printf("%#v\n", u.BundleInstance)
+	v := u.BundleInstance.ModuleInstance.GetBindingValue(unistring.String(u.Exec), true)
+	fn, ok := goja.AssertFunction(v)
 	if !ok {
 		// Shouldn't happen; this is validated in cmd.validateScenarioConfig()
 		panic(fmt.Sprintf("function '%s' not found in exports", u.Exec))

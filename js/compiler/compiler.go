@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja/ast"
 	"github.com/dop251/goja/parser"
 	"github.com/go-sourcemap/sourcemap"
 	"github.com/sirupsen/logrus"
@@ -188,6 +189,11 @@ type compilationState struct {
 	compiler *Compiler
 }
 
+// Parse the program in the given CompatibilityMode, wrapping it between pre and post code
+func (c *Compiler) Parse(src, filename string, main bool) (*ast.Program, bool, error) {
+	return c.parseImpl(src, filename, main, c.Options.CompatibilityMode, nil)
+}
+
 // Compile the program in the given CompatibilityMode, wrapping it between pre and post code
 func (c *Compiler) Compile(src, filename string, main bool) (*goja.Program, string, error) {
 	return c.compileImpl(src, filename, main, c.Options.CompatibilityMode, nil)
@@ -220,6 +226,46 @@ func (c *compilationState) sourceMapLoader(path string) ([]byte, error) {
 	return c.srcMap, nil
 }
 
+func (c *Compiler) parseImpl(
+	src, filename string, main bool, compatibilityMode lib.CompatibilityMode, srcMap []byte,
+) (*ast.Program, bool, error) {
+	code := src
+	state := compilationState{srcMap: srcMap, compiler: c, main: main}
+	if !main { // the lines in the sourcemap (if available) will be fixed by increaseMappingsByOne
+		code = "(function(module, exports){\n" + code + "\n})\n"
+	}
+	opts := parser.WithDisableSourceMaps
+	if c.Options.SourceMapLoader != nil {
+		opts = parser.WithSourceMapLoader(state.sourceMapLoader)
+	}
+	ast, err := parser.ParseFile(nil, filename, code, 0, opts, parser.IsModule)
+
+	if state.couldntLoadSourceMap {
+		state.couldntLoadSourceMap = false // reset
+		// we probably don't want to abort scripts which have source maps but they can't be found,
+		// this also will be a breaking change, so if we couldn't we retry with it disabled
+		c.logger.WithError(state.srcMapError).Warnf("Couldn't load source map for %s", filename)
+		ast, err = parser.ParseFile(nil, filename, code, 0, parser.WithDisableSourceMaps, parser.IsModule)
+	}
+
+	if err != nil {
+		if compatibilityMode == lib.CompatibilityModeExtended {
+			code, state.srcMap, err = c.Transform(src, filename, state.srcMap)
+			if err != nil {
+				return nil, false, err
+			}
+			// the compatibility mode "decreases" here as we shouldn't transform twice
+			return c.parseImpl(code, filename, main, lib.CompatibilityModeBase, state.srcMap)
+		}
+		return nil, false, err
+	}
+	isModule := len(ast.ExportEntries) > 0 || len(ast.ImportEntries) > 0
+	if isModule {
+		c.logger.Info("ExportEntries found, this is a module")
+	}
+	return ast, isModule, nil
+}
+
 func (c *Compiler) compileImpl(
 	src, filename string, main bool, compatibilityMode lib.CompatibilityMode, srcMap []byte,
 ) (*goja.Program, string, error) {
@@ -232,14 +278,14 @@ func (c *Compiler) compileImpl(
 	if c.Options.SourceMapLoader != nil {
 		opts = parser.WithSourceMapLoader(state.sourceMapLoader)
 	}
-	ast, err := parser.ParseFile(nil, filename, code, 0, opts)
+	ast, err := parser.ParseFile(nil, filename, code, 0, opts, parser.IsModule)
 
 	if state.couldntLoadSourceMap {
 		state.couldntLoadSourceMap = false // reset
 		// we probably don't want to abort scripts which have source maps but they can't be found,
 		// this also will be a breaking change, so if we couldn't we retry with it disabled
 		c.logger.WithError(state.srcMapError).Warnf("Couldn't load source map for %s", filename)
-		ast, err = parser.ParseFile(nil, filename, code, 0, parser.WithDisableSourceMaps)
+		ast, err = parser.ParseFile(nil, filename, code, 0, parser.WithDisableSourceMaps, parser.IsModule)
 	}
 	if err != nil {
 		if compatibilityMode == lib.CompatibilityModeExtended {
@@ -251,6 +297,9 @@ func (c *Compiler) compileImpl(
 			return c.compileImpl(code, filename, main, lib.CompatibilityModeBase, state.srcMap)
 		}
 		return nil, code, err
+	}
+	if len(ast.ExportEntries) > 0 {
+		c.logger.Info("ExportEntries found, this is a module")
 	}
 	pgm, err := goja.CompileAST(ast, c.Options.Strict)
 	return pgm, code, err

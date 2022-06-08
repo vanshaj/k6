@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"net/url"
 	"runtime"
+	"strings"
 
 	"github.com/dop251/goja"
 	"github.com/sirupsen/logrus"
@@ -37,6 +38,7 @@ import (
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/compiler"
 	"go.k6.io/k6/js/eventloop"
+	"go.k6.io/k6/js/modules"
 	"go.k6.io/k6/lib"
 	"go.k6.io/k6/lib/consts"
 	"go.k6.io/k6/loader"
@@ -48,6 +50,7 @@ import (
 type Bundle struct {
 	Filename *url.URL
 	Source   string
+	Module   goja.ModuleRecord
 	Program  *goja.Program
 	Options  lib.Options
 
@@ -62,13 +65,18 @@ type Bundle struct {
 
 // A BundleInstance is a self-contained instance of a Bundle.
 type BundleInstance struct {
-	Runtime *goja.Runtime
-	Context *context.Context
+	Runtime        *goja.Runtime
+	Context        *context.Context
+	ModuleInstance goja.ModuleInstance
 
 	// TODO: maybe just have a reference to the Bundle? or save and pass rtOpts?
 	env map[string]string
 
 	exports map[string]goja.Callable
+}
+type moduleCacheElement struct {
+	err error
+	m   goja.ModuleRecord
 }
 
 // NewBundle creates a new bundle from a source file and a filesystem.
@@ -89,24 +97,81 @@ func NewBundle(
 		Strict:            true,
 		SourceMapLoader:   generateSourceMapLoader(logger, filesystems),
 	}
-	pgm, _, err := c.Compile(code, src.URL.String(), true)
+	pwd := loader.Dir(src.URL)
+	rt := goja.New()
+	i := NewInitContext(logger, rt, c, compatMode, new(context.Context),
+		filesystems, loader.Dir(src.URL))
+
+	cache := make(map[string]moduleCacheElement)
+	var resolveModule goja.HostResolveImportedModuleFunc
+	resolveModule = func(_ interface{}, specifier string) (goja.ModuleRecord, error) {
+		// TODO fix
+		fileURL, err := loader.Resolve(pwd, specifier)
+		if err != nil {
+			return nil, err
+		}
+		if specifier == "k6" || strings.HasPrefix(specifier, "k6/") {
+			mod, ok := i.modules[specifier]
+			if !ok {
+				return nil, fmt.Errorf("unknown module: %s", specifier)
+			}
+			k6m, ok := mod.(modules.Module)
+			if !ok {
+				return nil, fmt.Errorf("Unsupported not native module " + specifier)
+			}
+			return wrapModule(k6m), nil
+		}
+		originalSpecifier := specifier
+		specifier = fileURL.String()
+		k, ok := cache[specifier]
+		if ok {
+			return k.m, k.err
+		}
+		code, err := loader.Load(logger, filesystems, fileURL, originalSpecifier)
+		if err != nil {
+			return nil, err
+		}
+
+		ast, isModule, err := c.Parse(string(code.Data), specifier, true)
+		if err != nil {
+			cache[specifier] = moduleCacheElement{err: err}
+			return nil, err
+		}
+		if !isModule {
+			logger.WithField("specifier", specifier).Error("Not module !!!!!!! TO BE IMPLEMENTED")
+			return nil, fmt.Errorf("NOT MODULE TO BE IMPLEMENTED")
+			// TODO warning
+			// TODO Implement wrapper
+		}
+		m, err := goja.ModuleFromAST(specifier, ast, resolveModule)
+		if err != nil {
+			cache[specifier] = moduleCacheElement{err: err}
+			return nil, err
+		}
+		cache[specifier] = moduleCacheElement{m: m}
+		return m, nil
+	}
+
+	m, err := resolveModule(nil, src.URL.String())
+	if err != nil {
+		return nil, err
+	}
+	err = m.Link()
 	if err != nil {
 		return nil, err
 	}
 	// Make a bundle, instantiate it into a throwaway VM to populate caches.
-	rt := goja.New()
 	bundle := Bundle{
 		Filename: src.URL,
 		Source:   code,
-		Program:  pgm,
-		BaseInitContext: NewInitContext(logger, rt, c, compatMode, new(context.Context),
-			filesystems, loader.Dir(src.URL)),
-		RuntimeOptions:    rtOpts,
+		// Program:  pgm,
+		Module:          m,
+		BaseInitContext: i, RuntimeOptions: rtOpts,
 		CompatibilityMode: compatMode,
 		exports:           make(map[string]goja.Callable),
 		registry:          registry,
 	}
-	if err = bundle.instantiate(logger, rt, bundle.BaseInitContext, 0); err != nil {
+	if _, err = bundle.instantiate(logger, rt, bundle.BaseInitContext, 0); err != nil {
 		return nil, err
 	}
 
@@ -172,7 +237,7 @@ func NewBundleFromArchive(
 		registry:          registry,
 	}
 
-	if err = bundle.instantiate(logger, rt, bundle.BaseInitContext, 0); err != nil {
+	if _, err = bundle.instantiate(logger, rt, bundle.BaseInitContext, 0); err != nil {
 		return nil, err
 	}
 
@@ -209,6 +274,11 @@ func (b *Bundle) makeArchive() *lib.Archive {
 
 // getExports validates and extracts exported objects
 func (b *Bundle) getExports(logger logrus.FieldLogger, rt *goja.Runtime, options bool) error {
+	names := b.Module.GetExportedNames()
+
+	for _, name := range names {
+		b.exports[name] = goja.Callable(nil)
+	}
 	exportsV := rt.Get("exports")
 	if goja.IsNull(exportsV) || goja.IsUndefined(exportsV) {
 		return errors.New("exports must be an object")
@@ -260,16 +330,19 @@ func (b *Bundle) Instantiate(
 	// runtime, but no state, to allow module-provided types to function within the init context.
 	vuImpl.runtime = goja.New()
 	init := newBoundInitContext(b.BaseInitContext, vuImpl)
-	if err := b.instantiate(logger, vuImpl.runtime, init, vuID); err != nil {
+	var mi goja.ModuleInstance
+	var err error
+	if mi, err = b.instantiate(logger, vuImpl.runtime, init, vuID); err != nil {
 		return nil, err
 	}
 
 	rt := vuImpl.runtime
 	bi = &BundleInstance{
-		Runtime: rt,
-		Context: &vuImpl.ctx,
-		exports: make(map[string]goja.Callable),
-		env:     b.RuntimeOptions.Env,
+		Runtime:        rt,
+		Context:        &vuImpl.ctx,
+		exports:        make(map[string]goja.Callable),
+		env:            b.RuntimeOptions.Env,
+		ModuleInstance: mi,
 	}
 
 	// Grab any exported functions that could be executed. These were
@@ -297,9 +370,20 @@ func (b *Bundle) Instantiate(
 	return bi, instErr
 }
 
+// fix
+type vugetter struct {
+	vu *moduleVUImpl
+}
+
+func (v vugetter) get() *moduleVUImpl {
+	return v.vu
+}
+
 // Instantiates the bundle into an existing runtime. Not public because it also messes with a bunch
 // of other things, will potentially thrash data and makes a mess in it if the operation fails.
-func (b *Bundle) instantiate(logger logrus.FieldLogger, rt *goja.Runtime, init *InitContext, vuID uint64) (err error) {
+func (b *Bundle) instantiate(
+	logger logrus.FieldLogger, rt *goja.Runtime, init *InitContext, vuID uint64,
+) (goja.ModuleInstance, error) {
 	rt.SetFieldNameMapper(common.FieldNameMapper{})
 	rt.SetRandSource(common.NewRandSource())
 
@@ -320,6 +404,8 @@ func (b *Bundle) instantiate(logger logrus.FieldLogger, rt *goja.Runtime, init *
 	if init.compatibilityMode == lib.CompatibilityModeExtended {
 		rt.Set("global", rt.GlobalObject())
 	}
+	rt.GlobalObject().DefineDataProperty("vugetter",
+		rt.ToValue(vugetter{init.moduleVUImpl}), goja.FLAG_FALSE, goja.FLAG_FALSE, goja.FLAG_FALSE)
 
 	// TODO: get rid of the unused ctxPtr, use a real external context (so we
 	// can interrupt), build the common.InitEnvironment earlier and reuse it
@@ -333,9 +419,15 @@ func (b *Bundle) instantiate(logger logrus.FieldLogger, rt *goja.Runtime, init *
 	init.moduleVUImpl.ctx = context.Background()
 	unbindInit := b.setInitGlobals(rt, init)
 	init.moduleVUImpl.eventLoop = eventloop.New(init.moduleVUImpl)
+	var mi goja.ModuleInstance
+	var err error
 	err = common.RunWithPanicCatching(logger, rt, func() error {
 		return init.moduleVUImpl.eventLoop.Start(func() error {
-			_, errRun := rt.RunProgram(b.Program)
+			/*
+				_, errRun := rt.RunProgram(b.Program)
+			*/
+			var errRun error
+			mi, errRun = b.Module.Evaluate(rt)
 			return errRun
 		})
 	})
@@ -345,7 +437,7 @@ func (b *Bundle) instantiate(logger logrus.FieldLogger, rt *goja.Runtime, init *
 		if errors.As(err, &exception) {
 			err = &scriptException{inner: exception}
 		}
-		return err
+		return nil, err
 	}
 	unbindInit()
 	init.moduleVUImpl.ctx = nil
@@ -359,7 +451,7 @@ func (b *Bundle) instantiate(logger logrus.FieldLogger, rt *goja.Runtime, init *
 
 	rt.SetRandSource(common.NewRandSource())
 
-	return nil
+	return mi, nil
 }
 
 func (b *Bundle) setInitGlobals(rt *goja.Runtime, init *InitContext) (unset func()) {

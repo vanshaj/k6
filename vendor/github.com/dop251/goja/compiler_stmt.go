@@ -2,6 +2,7 @@ package goja
 
 import (
 	"fmt"
+
 	"github.com/dop251/goja/ast"
 	"github.com/dop251/goja/file"
 	"github.com/dop251/goja/token"
@@ -9,7 +10,6 @@ import (
 )
 
 func (c *compiler) compileStatement(v ast.Statement, needResult bool) {
-
 	switch v := v.(type) {
 	case *ast.BlockStatement:
 		c.compileBlockStatement(v, needResult)
@@ -51,6 +51,10 @@ func (c *compiler) compileStatement(v ast.Statement, needResult bool) {
 	case *ast.WithStatement:
 		c.compileWithStatement(v, needResult)
 	case *ast.DebuggerStatement:
+	case *ast.ImportDeclaration:
+		c.compileImportDeclaration(v)
+	case *ast.ExportDeclaration:
+		c.compileExportDeclaration(v)
 	default:
 		panic(fmt.Errorf("Unknown statement type: %T", v))
 	}
@@ -763,6 +767,115 @@ func (c *compiler) emitVarAssign(name unistring.String, offset int, init compile
 			c.emitNamedOrConst(init, name)
 			c.p.addSrcMap(offset)
 			c.emit(initValueP)
+		}
+	}
+}
+
+func (c *compiler) compileExportDeclaration(expr *ast.ExportDeclaration) {
+	// module := c.module // the compiler.module might be different at execution of this
+	// fmt.Printf("Export %#v\n", expr)
+	if expr.Variable != nil {
+		c.compileVariableStatement(expr.Variable)
+	} else if expr.LexicalDeclaration != nil {
+		c.compileLexicalDeclaration(expr.LexicalDeclaration)
+	} else if expr.HoistableDeclaration != nil {
+		h := expr.HoistableDeclaration
+		if h.FunctionLiteral != nil {
+			if !expr.IsDefault {
+				panic("non default function literal export")
+			}
+			// TODO fix this - this was the easiest way to bound the default to something
+			c.compileLexicalDeclaration(&ast.LexicalDeclaration{
+				Idx:   h.FunctionLiteral.Idx0(),
+				Token: token.CONST,
+				List: []*ast.Binding{
+					{
+						Target: &ast.Identifier{
+							Name: unistring.String("*default*"),
+							Idx:  h.FunctionLiteral.Idx0(),
+						},
+						Initializer: h.FunctionLiteral,
+					},
+				},
+			})
+			// r.emitGetter(true)
+			// r.markAccessPoint()
+
+			/*
+				b, _ := c.scope.lookupName(h.FunctionDeclaration.Function.Name.Name)
+				b.markAccessPoint()
+				c.emit(exportPrevious{callback: func(getter func() Value) {
+					module.exportGetters[h.FunctionDeclaration.Function.Name.Name] = getter
+				}})
+			*/
+		}
+	}
+	// TODO
+}
+
+func (c *compiler) compileImportDeclaration(expr *ast.ImportDeclaration) {
+	if expr.FromClause == nil {
+		return // TODO is this right?
+	}
+	// TODO fix, maybe cache this?!? have the current module as a field?
+	module, err := c.hostResolveImportedModule(nil, expr.FromClause.ModuleSpecifier.String())
+	_ = module // TODO fix
+	if err != nil {
+		// TODO this should in practice never happen
+		c.throwSyntaxError(int(expr.Idx0()), err.Error())
+	}
+	if expr.ImportClause != nil {
+		if namespace := expr.ImportClause.NameSpaceImport; namespace != nil {
+			c.throwSyntaxError(int(expr.Idx0()), "namespace imports not implemented")
+		}
+		if named := expr.ImportClause.NamedImports; named != nil {
+			for _, name := range named.ImportsList {
+				value, ambiguous := module.ResolveExport(name.IdentifierName.String())
+
+				if ambiguous { // also ambiguous
+					c.throwSyntaxError(int(expr.Idx0()), "ambiguous import of %s", name.IdentifierName.String())
+				}
+				if value == nil {
+					c.throwSyntaxError(int(expr.Idx0()), "import of %s was not expoted from module %s", name.IdentifierName.String(), expr.FromClause.ModuleSpecifier.String())
+				}
+
+				n := name.Alias
+				if n.String() == "" {
+					n = name.IdentifierName
+				}
+				localB, _ := c.scope.lookupName(n)
+				if localB == nil {
+					c.throwSyntaxError(int(expr.Idx0()), "couldn't lookup  %s", n)
+				}
+				identifier := name.IdentifierName // this
+				// moduleName := expr.FromClause.ModuleSpecifier.String()
+				localB.getIndirect = func(vm *vm) Value {
+					m := vm.r.modules[module]
+					return m.GetBindingValue(identifier, true)
+				}
+			}
+		}
+
+		if def := expr.ImportClause.ImportedDefaultBinding; def != nil {
+			value, ambiguous := module.ResolveExport("default")
+
+			if ambiguous { // also ambiguous
+				c.throwSyntaxError(int(expr.Idx0()), "ambiguous import of default")
+			}
+			if value == nil {
+				c.throwSyntaxError(int(expr.Idx0()), "import of default was not exported from module %s", expr.FromClause.ModuleSpecifier.String())
+			}
+
+			localB, _ := c.scope.lookupName(def.Name)
+			if localB == nil {
+				c.throwSyntaxError(int(expr.Idx0()), "couldn't lookup  %s", def.Name)
+			}
+			// moduleName := expr.FromClause.ModuleSpecifier.String()
+			localB.getIndirect = func(vm *vm) Value {
+				// TODO this should be just "default", this also likely doesn't work for export aliasing
+				m := vm.r.modules[module]
+				return m.GetBindingValue(unistring.String("default"), true)
+			}
 		}
 	}
 }

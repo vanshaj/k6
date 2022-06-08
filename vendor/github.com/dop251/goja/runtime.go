@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/dop251/goja/file"
 	"go/ast"
 	"hash/maphash"
 	"math"
@@ -14,6 +13,8 @@ import (
 	"runtime"
 	"strconv"
 	"time"
+
+	"github.com/dop251/goja/file"
 
 	"golang.org/x/text/collate"
 
@@ -181,6 +182,8 @@ type Runtime struct {
 	vm    *vm
 	hash  *maphash.Hash
 	idSeq uint64
+
+	modules map[ModuleRecord]ModuleInstance
 
 	jobQueue []func()
 
@@ -470,12 +473,7 @@ func (r *Runtime) typeErrorResult(throw bool, args ...interface{}) {
 }
 
 func (r *Runtime) newError(typ *Object, format string, args ...interface{}) Value {
-	var msg string
-	if len(args) > 0 {
-		msg = fmt.Sprintf(format, args...)
-	} else {
-		msg = format
-	}
+	msg := fmt.Sprintf(format, args...)
 	return r.builtin_new(typ, []Value{newStringValue(msg)})
 }
 
@@ -1353,7 +1351,6 @@ func (r *Runtime) RunString(str string) (Value, error) {
 // RunScript executes the given string in the global context.
 func (r *Runtime) RunScript(name, src string) (Value, error) {
 	p, err := r.compile(name, src, false, false, true)
-
 	if err != nil {
 		return nil, err
 	}

@@ -30,6 +30,7 @@ import (
 	"strings"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja/unistring"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 
@@ -399,4 +400,48 @@ func getJSModules() map[string]interface{} {
 	}
 
 	return result
+}
+
+type wrappedModule struct {
+	m modules.Module
+}
+
+func wrapModule(m modules.Module) goja.ModuleRecord {
+	// TODO this needs to be the default IMO
+	return wrappedModule{
+		m: m,
+	}
+}
+
+func (w wrappedModule) Link() error {
+	return nil // TDOF fix
+}
+
+func (w wrappedModule) Evaluate(rt *goja.Runtime) (goja.ModuleInstance, error) {
+	vu := rt.GlobalObject().Get("vugetter").Export().(vugetter).get() //nolint:forcetypeassert
+	mi := w.m.NewModuleInstance(vu)
+	return &wrappedModuleInstance{mi: mi, rt: rt}, nil // TDOF fix
+}
+
+func (w wrappedModule) GetExportedNames(set ...*goja.SourceTextModuleRecord) []string {
+	return []string{}
+}
+
+func (w wrappedModule) ResolveExport(exportName string, set ...goja.ResolveSetElement) (*goja.ResolvedBinding, bool) {
+	return &goja.ResolvedBinding{
+		Module:      w,
+		BindingName: exportName,
+	}, false
+}
+
+type wrappedModuleInstance struct {
+	mi modules.Instance
+	rt *goja.Runtime
+}
+
+func (wmi *wrappedModuleInstance) GetBindingValue(name unistring.String, _ bool) goja.Value {
+	if name.String() == "default" {
+		return wmi.rt.ToValue(wmi.mi.Exports().Default)
+	}
+	return wmi.rt.ToValue(wmi.mi.Exports().Named[name.String()])
 }

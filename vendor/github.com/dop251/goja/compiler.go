@@ -2,8 +2,9 @@ package goja
 
 import (
 	"fmt"
-	"github.com/dop251/goja/token"
 	"sort"
+
+	"github.com/dop251/goja/token"
 
 	"github.com/dop251/goja/ast"
 	"github.com/dop251/goja/file"
@@ -76,6 +77,9 @@ type compiler struct {
 	block *block
 
 	enumGetExpr compiledEnumGetExpr
+	// TODO add a type and a set method
+	hostResolveImportedModule func(referencingScriptOrModule interface{}, specifier string) (ModuleRecord, error)
+	module                    *SourceTextModuleRecord
 
 	evalVM *vm
 }
@@ -84,6 +88,7 @@ type binding struct {
 	scope        *scope
 	name         unistring.String
 	accessPoints map[*scope]*[]int
+	getIndirect  func(vm *vm) Value
 	isConst      bool
 	isStrict     bool
 	isArg        bool
@@ -123,7 +128,9 @@ func (b *binding) markAccessPoint() {
 
 func (b *binding) emitGet() {
 	b.markAccessPoint()
-	if b.isVar && !b.isArg {
+	if b.getIndirect != nil {
+		b.scope.c.emit(loadIndirect(b.getIndirect))
+	} else if b.isVar && !b.isArg {
 		b.scope.c.emit(loadStash(0))
 	} else {
 		b.scope.c.emit(loadStashLex(0))
@@ -261,6 +268,8 @@ type scope struct {
 	argsNeeded bool
 	// 'this' is used and non-strict, so need to box it (functions only)
 	thisNeeded bool
+	// is module
+	// module *SourceTextModuleRecord
 }
 
 type block struct {
@@ -348,6 +357,9 @@ func newCompiler() *compiler {
 }
 
 func (p *Program) defineLiteralValue(val Value) uint32 {
+	if val == nil {
+		panic("wat")
+	}
 	for idx, v := range p.values {
 		if v.SameAs(val) {
 			return uint32(idx)
@@ -497,6 +509,7 @@ func (s *scope) finaliseVarAlloc(stackOffset int) (stashSize, stackSize int) {
 	stackIdx, stashIdx := 0, 0
 	allInStash := s.isDynamic()
 	for i, b := range s.bindings {
+		// fmt.Printf("Binding %+v\n", b)
 		if allInStash || b.inStash {
 			for scope, aps := range b.accessPoints {
 				var level uint32
@@ -516,6 +529,11 @@ func (s *scope) finaliseVarAlloc(stackOffset int) (stashSize, stackSize int) {
 					switch i := (*ap).(type) {
 					case loadStash:
 						*ap = loadStash(idx)
+					case export:
+						*ap = export{
+							idx:      idx,
+							callback: i.callback,
+						}
 					case storeStash:
 						*ap = storeStash(idx)
 					case storeStashP:
@@ -681,6 +699,151 @@ found:
 	s.bindings = s.bindings[:l]
 }
 
+func (c *compiler) compileModule(module *SourceTextModuleRecord) {
+	oldModule := c.module
+	c.module = module
+	oldResolve := c.hostResolveImportedModule
+	c.hostResolveImportedModule = module.hostResolveImportedModule
+	defer func() {
+		c.module = oldModule
+		c.hostResolveImportedModule = oldResolve
+	}()
+	in := module.body
+	c.p.src = in.File
+	strict := true
+	inGlobal := false
+	eval := false
+
+	c.newScope()
+	scope := c.scope
+	scope.dynamic = true
+	scope.eval = eval
+	if !strict && len(in.Body) > 0 {
+		strict = c.isStrict(in.Body) != nil
+	}
+	scope.strict = strict
+	ownVarScope := eval && strict || true
+	ownLexScope := !inGlobal || eval
+	if ownVarScope {
+		c.newBlockScope()
+		scope = c.scope
+		scope.function = true
+	}
+	// scope.module = module
+	// module.scope = scope
+	// 15.2.1.17.4 step 9 start
+	for _, in := range module.importEntries {
+		importedModule, err := c.hostResolveImportedModule(module, in.moduleRequest)
+		if err != nil {
+			panic(fmt.Errorf("previously resolved module returned error %w", err))
+		}
+		if in.importName == "*" {
+		} else {
+			resolution, ambiguous := importedModule.ResolveExport(in.importName)
+			if resolution == nil || ambiguous {
+				c.throwSyntaxError(in.offset, "ambiguous import of %s", in.importName)
+			}
+			if resolution.BindingName == "*namespace*" {
+			} else {
+				// c.createImportBinding(in.localName, resolution.Module, resolution.BindingName)
+				c.createImmutableBinding(unistring.String(in.localName), true)
+			}
+		}
+	}
+	// 15.2.1.17.4 step 9 end
+	funcs := c.extractFunctions(in.Body)
+	c.createFunctionBindings(funcs)
+	numFuncs := len(scope.bindings)
+	if inGlobal && !ownVarScope {
+		if numFuncs == len(funcs) {
+			c.compileFunctionsGlobalAllUnique(funcs)
+		} else {
+			c.compileFunctionsGlobal(funcs)
+		}
+	}
+	c.compileDeclList(in.DeclarationList, false)
+	numVars := len(scope.bindings) - numFuncs
+	vars := make([]unistring.String, len(scope.bindings))
+	for i, b := range scope.bindings {
+		vars[i] = b.name
+	}
+	if len(vars) > 0 && !ownVarScope && ownLexScope {
+		if inGlobal {
+			c.emit(&bindGlobal{
+				vars:      vars[numFuncs:],
+				funcs:     vars[:numFuncs],
+				deletable: eval,
+			})
+		} else {
+			c.emit(&bindVars{names: vars, deletable: eval})
+		}
+	}
+	var enter *enterBlock
+	if c.compileLexicalDeclarations(in.Body, ownVarScope || !ownLexScope) {
+		if ownLexScope {
+			c.block = &block{
+				outer:      c.block,
+				typ:        blockScope,
+				needResult: true,
+			}
+			enter = &enterBlock{}
+			c.emit(enter)
+		}
+	}
+
+	for _, entry := range module.localExportEntries {
+		name := unistring.String(entry.localName)
+		b, ok := scope.boundNames[name]
+		if !ok {
+			// TODO fix this somehow - this is as *default* doesn't get bound before it's used
+			b, _ = scope.bindName(name)
+		}
+
+		b.inStash = true
+		b.markAccessPoint()
+
+		exportName := unistring.String(entry.exportName)
+		c.emit(export{callback: func(vm *vm, getter func() Value) {
+			m := vm.r.modules[module]
+
+			if s, ok := m.(*SourceTextModuleInstance); !ok {
+				fmt.Println(vm.r.modules, module.name)
+				vm.r.throwReferenceError(exportName) // TODO fix
+			} else {
+				s.exportGetters[exportName] = getter
+			}
+		}})
+	}
+	if len(scope.bindings) > 0 && !ownLexScope {
+		var lets, consts []unistring.String
+		for _, b := range c.scope.bindings[numFuncs+numVars:] {
+			if b.isConst {
+				consts = append(consts, b.name)
+			} else {
+				lets = append(lets, b.name)
+			}
+		}
+		c.emit(&bindGlobal{
+			vars:   vars[numFuncs:],
+			funcs:  vars[:numFuncs],
+			lets:   lets,
+			consts: consts,
+		})
+	}
+	if !inGlobal || ownVarScope {
+		c.compileFunctions(funcs)
+	}
+	c.compileStatements(in.Body, true)
+	if enter != nil {
+		c.leaveScopeBlock(enter)
+		c.popScope()
+	}
+
+	c.p.code = append(c.p.code, halt)
+
+	scope.finaliseVarAlloc(0)
+}
+
 func (c *compiler) compile(in *ast.Program, strict, eval, inGlobal bool) {
 	c.p.src = in.File
 	c.newScope()
@@ -792,6 +955,11 @@ func (c *compiler) extractFunctions(list []ast.Statement) (funcs []*ast.Function
 			} else {
 				continue
 			}
+		case *ast.ExportDeclaration:
+			if st.HoistableDeclaration == nil || st.HoistableDeclaration.FunctionDeclaration == nil {
+				continue
+			}
+			decl = st.HoistableDeclaration.FunctionDeclaration
 		default:
 			continue
 		}
@@ -905,6 +1073,14 @@ func (c *compiler) createVarBindings(v *ast.VariableDeclaration, inFunc bool) {
 	}
 }
 
+func (c *compiler) createImmutableBinding(name unistring.String, isStrict bool) *binding {
+	b, _ := c.scope.bindName(name)
+	b.isConst = true
+	b.isVar = true
+	b.isStrict = isStrict
+	return b
+}
+
 func (c *compiler) createLexicalIdBinding(name unistring.String, isConst bool, offset int) *binding {
 	if name == "let" {
 		c.throwSyntaxError(offset, "let is disallowed as a lexically bound name")
@@ -956,13 +1132,22 @@ func (c *compiler) createLexicalBindings(lex *ast.LexicalDeclaration) {
 
 func (c *compiler) compileLexicalDeclarations(list []ast.Statement, scopeDeclared bool) bool {
 	for _, st := range list {
-		if lex, ok := st.(*ast.LexicalDeclaration); ok {
-			if !scopeDeclared {
-				c.newBlockScope()
-				scopeDeclared = true
-			}
-			c.createLexicalBindings(lex)
+		var lex *ast.LexicalDeclaration
+		switch st := st.(type) {
+		case *ast.LexicalDeclaration:
+			lex = st
+		case *ast.ExportDeclaration:
+			lex = st.LexicalDeclaration
 		}
+		if lex == nil {
+			continue
+		}
+		if !scopeDeclared {
+			c.newBlockScope()
+			scopeDeclared = true
+		}
+		c.createLexicalBindings(lex)
+
 	}
 	return scopeDeclared
 }
@@ -1003,6 +1188,8 @@ func (c *compiler) compileStandaloneFunctionDecl(v *ast.FunctionDeclaration) {
 }
 
 func (c *compiler) emit(instructions ...instruction) {
+	// fmt.Printf("emit instructions %s\n", spew.Sdump(instructions))
+	// fmt.Printf("on instructions %s\n", spew.Sdump(c.p.code))
 	c.p.code = append(c.p.code, instructions...)
 }
 
