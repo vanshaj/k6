@@ -31,6 +31,7 @@ import (
 	"strings"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja/unistring"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	"gopkg.in/guregu/null.v3"
@@ -127,12 +128,18 @@ func NewBundle(
 		if ok {
 			return k.m, k.err
 		}
-		code, err := loader.Load(logger, filesystems, fileURL, originalSpecifier)
-		if err != nil {
-			return nil, err
+		var resolvedSrc *loader.SourceData
+		if originalSpecifier == src.URL.String() {
+			// This mostly exists for tests ... kind of
+			resolvedSrc = src
+		} else {
+			resolvedSrc, err = loader.Load(logger, filesystems, fileURL, originalSpecifier)
+			if err != nil {
+				return nil, err
+			}
 		}
 
-		ast, isModule, err := c.Parse(string(code.Data), specifier, true)
+		ast, isModule, err := c.Parse(string(resolvedSrc.Data), specifier, true)
 		if err != nil {
 			cache[specifier] = moduleCacheElement{err: err}
 			return nil, err
@@ -207,13 +214,77 @@ func NewBundleFromArchive(
 		CompatibilityMode: compatMode,
 		SourceMapLoader:   generateSourceMapLoader(logger, arc.Filesystems),
 	}
-	pgm, _, err := c.Compile(string(arc.Data), arc.FilenameURL.String(), true)
+	pwd := loader.Dir(arc.PwdURL)
+	rt := goja.New()
+	i := NewInitContext(logger, rt, c, compatMode,
+		new(context.Context), arc.Filesystems, arc.PwdURL)
+
+	cache := make(map[string]moduleCacheElement)
+	var resolveModule goja.HostResolveImportedModuleFunc
+	resolveModule = func(_ interface{}, specifier string) (goja.ModuleRecord, error) {
+		// TODO fix
+		fileURL, err := loader.Resolve(pwd, specifier)
+		if err != nil {
+			return nil, err
+		}
+		if specifier == "k6" || strings.HasPrefix(specifier, "k6/") {
+			mod, ok := i.modules[specifier]
+			if !ok {
+				return nil, fmt.Errorf("unknown module: %s", specifier)
+			}
+			k6m, ok := mod.(modules.Module)
+			if !ok {
+				return nil, fmt.Errorf("Unsupported not native module " + specifier)
+			}
+			return wrapModule(k6m), nil
+		}
+		originalSpecifier := specifier
+		specifier = fileURL.String()
+		k, ok := cache[specifier]
+		if ok {
+			return k.m, k.err
+		}
+		var resolvedSrc *loader.SourceData
+		var data []byte
+		if originalSpecifier == arc.Filename {
+			// This mostly exists for tests ... kind of
+			data = arc.Data
+		} else {
+			resolvedSrc, err = loader.Load(logger, arc.Filesystems, fileURL, originalSpecifier)
+			if err != nil {
+				return nil, err
+			}
+			data = resolvedSrc.Data
+		}
+
+		ast, isModule, err := c.Parse(string(data), specifier, true)
+		if err != nil {
+			cache[specifier] = moduleCacheElement{err: err}
+			return nil, err
+		}
+		if !isModule {
+			logger.WithField("specifier", specifier).Error("Not module !!!!!!! TO BE IMPLEMENTED")
+			return nil, fmt.Errorf("NOT MODULE TO BE IMPLEMENTED")
+			// TODO warning
+			// TODO Implement wrapper
+		}
+		m, err := goja.ModuleFromAST(specifier, ast, resolveModule)
+		if err != nil {
+			cache[specifier] = moduleCacheElement{err: err}
+			return nil, err
+		}
+		cache[specifier] = moduleCacheElement{m: m}
+		return m, nil
+	}
+
+	m, err := resolveModule(nil, arc.Filename)
 	if err != nil {
 		return nil, err
 	}
-	rt := goja.New()
-	initctx := NewInitContext(logger, rt, c, compatMode,
-		new(context.Context), arc.Filesystems, arc.PwdURL)
+	err = m.Link()
+	if err != nil {
+		return nil, err
+	}
 
 	env := arc.Env
 	if env == nil {
@@ -226,11 +297,12 @@ func NewBundleFromArchive(
 	rtOpts.Env = env
 
 	bundle := &Bundle{
-		Filename:          arc.FilenameURL,
-		Source:            string(arc.Data),
-		Program:           pgm,
+		Filename: arc.FilenameURL,
+		Source:   string(arc.Data),
+		Module:   m,
+		// Program:           pgm,
 		Options:           arc.Options,
-		BaseInitContext:   initctx,
+		BaseInitContext:   i,
 		RuntimeOptions:    rtOpts,
 		CompatibilityMode: compatMode,
 		exports:           make(map[string]goja.Callable),
@@ -345,27 +417,36 @@ func (b *Bundle) Instantiate(
 		ModuleInstance: mi,
 	}
 
-	// Grab any exported functions that could be executed. These were
-	// already pre-validated in cmd.validateScenarioConfig(), just get them here.
-	exports := rt.Get("exports").ToObject(rt)
-	for k := range b.exports {
-		fn, _ := goja.AssertFunction(exports.Get(k))
-		bi.exports[k] = fn
-	}
-
-	jsOptions := rt.Get("options")
-	var jsOptionsObj *goja.Object
-	if jsOptions == nil || goja.IsNull(jsOptions) || goja.IsUndefined(jsOptions) {
-		jsOptionsObj = rt.NewObject()
-		rt.Set("options", jsOptionsObj)
-	} else {
-		jsOptionsObj = jsOptions.ToObject(rt)
-	}
-	b.Options.ForEachSpecified("json", func(key string, val interface{}) {
-		if err := jsOptionsObj.Set(key, val); err != nil {
-			instErr = err
+	for _, name := range b.Module.GetExportedNames() {
+		v := mi.GetBindingValue(unistring.String(name), false)
+		fn, ok := goja.AssertFunction(v)
+		if ok {
+			bi.exports[name] = fn
 		}
-	})
+	}
+	/*
+		// Grab any exported functions that could be executed. These were
+		// already pre-validated in cmd.validateScenarioConfig(), just get them here.
+		exports := rt.Get("exports").ToObject(rt)
+		for k := range b.exports {
+			fn, _ := goja.AssertFunction(exports.Get(k))
+			bi.exports[k] = fn
+		}
+
+		jsOptions := rt.Get("options")
+		var jsOptionsObj *goja.Object
+		if jsOptions == nil || goja.IsNull(jsOptions) || goja.IsUndefined(jsOptions) {
+			jsOptionsObj = rt.NewObject()
+			rt.Set("options", jsOptionsObj)
+		} else {
+			jsOptionsObj = jsOptions.ToObject(rt)
+		}
+		b.Options.ForEachSpecified("json", func(key string, val interface{}) {
+			if err := jsOptionsObj.Set(key, val); err != nil {
+				instErr = err
+			}
+		})
+	*/
 
 	return bi, instErr
 }

@@ -110,7 +110,6 @@ func TestSetupDataMarshalling(t *testing.T) {
 											   second[element]);
 			});
 		}
-
 		export default function (data) {
 			diff_object_properties("setupdata", data, setup());
 		}
@@ -142,13 +141,9 @@ func TestSetupDataMarshalling(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if !assert.NoError(t, runner.Setup(ctx, samples)) {
-		return
-	}
+	require.NoError(t, runner.Setup(ctx, samples))
 	initVU, err := runner.NewVU(1, 1, samples)
-	if assert.NoError(t, err) {
-		vu := initVU.Activate(&lib.VUActivationParams{RunContext: ctx})
-		err := vu.RunOnce()
-		assert.NoError(t, err)
-	}
+	require.NoError(t, err)
+	vu := initVU.Activate(&lib.VUActivationParams{RunContext: ctx})
+	assert.NoError(t, vu.RunOnce())
 }

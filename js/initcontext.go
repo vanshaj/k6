@@ -420,7 +420,7 @@ func (w wrappedModule) Link() error {
 func (w wrappedModule) Evaluate(rt *goja.Runtime) (goja.ModuleInstance, error) {
 	vu := rt.GlobalObject().Get("vugetter").Export().(vugetter).get() //nolint:forcetypeassert
 	mi := w.m.NewModuleInstance(vu)
-	return &wrappedModuleInstance{mi: mi, rt: rt}, nil // TDOF fix
+	return &wrappedModuleInstance{mi: mi, rt: rt}, nil // TODO fix
 }
 
 func (w wrappedModule) GetExportedNames(set ...*goja.SourceTextModuleRecord) []string {
@@ -440,8 +440,13 @@ type wrappedModuleInstance struct {
 }
 
 func (wmi *wrappedModuleInstance) GetBindingValue(name unistring.String, _ bool) goja.Value {
-	if name.String() == "default" {
-		return wmi.rt.ToValue(wmi.mi.Exports().Default)
+	n := name.String()
+	exports := wmi.mi.Exports()
+	if n == "default" {
+		if exports.Default == nil {
+			return wmi.rt.ToValue(exports.Named)
+		}
+		return wmi.rt.ToValue(exports.Default)
 	}
-	return wmi.rt.ToValue(wmi.mi.Exports().Named[name.String()])
+	return wmi.rt.ToValue(exports.Named[n])
 }

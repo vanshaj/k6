@@ -104,9 +104,8 @@ func TestRunnerNew(t *testing.T) {
 func TestRunnerGetDefaultGroup(t *testing.T) {
 	t.Parallel()
 	r1, err := getSimpleRunner(t, "/script.js", `exports.default = function() {};`)
-	if assert.NoError(t, err) {
-		assert.NotNil(t, r1.GetDefaultGroup())
-	}
+	require.NoError(t, err)
+	assert.NotNil(t, r1.GetDefaultGroup())
 
 	registry := metrics.NewRegistry()
 	builtinMetrics := metrics.RegisterBuiltinMetrics(registry)
@@ -1227,7 +1226,7 @@ func TestVUIntegrationOpenFunctionErrorWhenSneaky(t *testing.T) {
 			var sneaky = open;
 			exports.default = function() { sneaky("/tmp/foo") }
 		`)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	initVU, err := r.NewVU(1, 1, make(chan metrics.SampleContainer, 100))
 	assert.NoError(t, err)
@@ -1235,7 +1234,7 @@ func TestVUIntegrationOpenFunctionErrorWhenSneaky(t *testing.T) {
 	defer cancel()
 	vu := initVU.Activate(&lib.VUActivationParams{RunContext: ctx})
 	err = vu.RunOnce()
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "only available in the init stage")
 }
 

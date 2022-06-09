@@ -23,7 +23,7 @@ github.com/davecgh/go-spew/spew
 ## explicit
 github.com/dlclark/regexp2
 github.com/dlclark/regexp2/syntax
-# github.com/dop251/goja v0.0.0-20220516123900-4418d4575a41 => github.com/mstoykov/goja v0.0.0-20220607142910-b1eeef49966d
+# github.com/dop251/goja v0.0.0-20220516123900-4418d4575a41 => github.com/mstoykov/goja v0.0.0-20220609080934-c1f7626fcf7d
 ## explicit; go 1.14
 github.com/dop251/goja
 github.com/dop251/goja/ast
@@ -303,4 +303,4 @@ gopkg.in/guregu/null.v3
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
-# github.com/dop251/goja => github.com/mstoykov/goja v0.0.0-20220607142910-b1eeef49966d
+# github.com/dop251/goja => github.com/mstoykov/goja v0.0.0-20220609080934-c1f7626fcf7d

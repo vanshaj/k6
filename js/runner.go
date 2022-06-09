@@ -385,7 +385,7 @@ func (r *Runner) HandleSummary(ctx context.Context, summary *lib.Summary) (map[s
 	}
 
 	handleSummaryFn := goja.Undefined()
-	if exported := vu.Runtime.Get("exports").ToObject(vu.Runtime); exported != nil {
+	if exported := vu.ModuleInstance.GetBindingValue(unistring.String("exports"), true).ToObject(vu.Runtime); exported != nil { //nolint:lll
 		fn := exported.Get(consts.HandleSummaryFn)
 		if _, ok := goja.AssertFunction(fn); ok {
 			handleSummaryFn = fn
@@ -525,11 +525,8 @@ func (r *Runner) runPart(
 	if err != nil {
 		return goja.Undefined(), err
 	}
-	exp := vu.Runtime.Get("exports").ToObject(vu.Runtime)
-	if exp == nil {
-		return goja.Undefined(), nil
-	}
-	fn, ok := goja.AssertFunction(exp.Get(name))
+	fnV := vu.BundleInstance.ModuleInstance.GetBindingValue(unistring.String(name), true)
+	fn, ok := goja.AssertFunction(fnV)
 	if !ok {
 		return goja.Undefined(), nil
 	}

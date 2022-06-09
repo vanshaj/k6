@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja/unistring"
 	"github.com/oxtoacart/bpool"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
@@ -288,7 +289,7 @@ func TestInitContextOpen(t *testing.T) {
 			t.Parallel()
 			bi, err := createAndReadFile(t, tc.file, tc.content, tc.length, "")
 			require.NoError(t, err)
-			assert.Equal(t, string(tc.content), bi.Runtime.Get("data").Export())
+			assert.Equal(t, string(tc.content), bi.ModuleInstance.GetBindingValue(unistring.String("data"), false).Export())
 		})
 	}
 

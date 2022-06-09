@@ -260,9 +260,6 @@ func (c *Compiler) parseImpl(
 		return nil, false, err
 	}
 	isModule := len(ast.ExportEntries) > 0 || len(ast.ImportEntries) > 0
-	if isModule {
-		c.logger.Info("ExportEntries found, this is a module")
-	}
 	return ast, isModule, nil
 }
 
