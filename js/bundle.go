@@ -61,7 +61,9 @@ type Bundle struct {
 	CompatibilityMode lib.CompatibilityMode // parsed value
 	registry          *metrics.Registry
 
-	exports map[string]goja.Callable
+	exports  map[string]goja.Callable
+	cache    map[string]moduleCacheElement
+	compiler *compiler.Compiler
 }
 
 // A BundleInstance is a self-contained instance of a Bundle.
@@ -78,6 +80,67 @@ type BundleInstance struct {
 type moduleCacheElement struct {
 	err error
 	m   goja.ModuleRecord
+}
+
+// TODO use the first argument
+func (b *Bundle) resolveModule(ref interface{}, specifier string) (goja.ModuleRecord, error) {
+	// todo fix
+	var pwd *url.URL
+	if ref == nil {
+		pwd = loader.Dir(b.Filename)
+	} // TODO fix this for all other cases using ref and cache
+	fileurl, err := loader.Resolve(pwd, specifier)
+	if err != nil {
+		return nil, err
+	}
+	if specifier == "k6" || strings.HasPrefix(specifier, "k6/") {
+		mod, ok := b.BaseInitContext.modules[specifier]
+		if !ok {
+			return nil, fmt.Errorf("unknown module: %s", specifier)
+		}
+		k6m, ok := mod.(modules.Module)
+		if !ok {
+			return nil, fmt.Errorf("unsupported not native module " + specifier)
+		}
+		return wrapModule(k6m), nil
+	}
+	originalspecifier := specifier //nolint:ifshort
+	specifier = fileurl.String()
+	k, ok := b.cache[specifier]
+	if ok {
+		return k.m, k.err
+	}
+	var data string
+	if originalspecifier == b.Filename.String() {
+		// this mostly exists for tests ... kind of
+		data = b.Source
+	} else {
+		var resolvedsrc *loader.SourceData
+		resolvedsrc, err = loader.Load(b.BaseInitContext.logger, b.BaseInitContext.filesystems, fileurl, originalspecifier)
+		if err != nil {
+			return nil, err
+		}
+		data = string(resolvedsrc.Data)
+	}
+
+	ast, ismodule, err := b.compiler.Parse(data, specifier, true)
+	if err != nil {
+		b.cache[specifier] = moduleCacheElement{err: err}
+		return nil, err
+	}
+	if !ismodule {
+		b.BaseInitContext.logger.WithField("specifier", specifier).Error("not module !!!!!!! to be implemented")
+		return nil, fmt.Errorf("not module to be implemented")
+		// todo warning
+		// todo implement wrapper
+	}
+	m, err := goja.ModuleFromAST(specifier, ast, b.resolveModule)
+	if err != nil {
+		b.cache[specifier] = moduleCacheElement{err: err}
+		return nil, err
+	}
+	b.cache[specifier] = moduleCacheElement{m: m}
+	return m, nil
 }
 
 // NewBundle creates a new bundle from a source file and a filesystem.
@@ -98,68 +161,25 @@ func NewBundle(
 		Strict:            true,
 		SourceMapLoader:   generateSourceMapLoader(logger, filesystems),
 	}
-	pwd := loader.Dir(src.URL)
+
 	rt := goja.New()
 	i := NewInitContext(logger, rt, c, compatMode, new(context.Context),
 		filesystems, loader.Dir(src.URL))
-
-	cache := make(map[string]moduleCacheElement)
-	var resolveModule goja.HostResolveImportedModuleFunc
-	resolveModule = func(_ interface{}, specifier string) (goja.ModuleRecord, error) {
-		// TODO fix
-		fileURL, err := loader.Resolve(pwd, specifier)
-		if err != nil {
-			return nil, err
-		}
-		if specifier == "k6" || strings.HasPrefix(specifier, "k6/") {
-			mod, ok := i.modules[specifier]
-			if !ok {
-				return nil, fmt.Errorf("unknown module: %s", specifier)
-			}
-			k6m, ok := mod.(modules.Module)
-			if !ok {
-				return nil, fmt.Errorf("Unsupported not native module " + specifier)
-			}
-			return wrapModule(k6m), nil
-		}
-		originalSpecifier := specifier
-		specifier = fileURL.String()
-		k, ok := cache[specifier]
-		if ok {
-			return k.m, k.err
-		}
-		var resolvedSrc *loader.SourceData
-		if originalSpecifier == src.URL.String() {
-			// This mostly exists for tests ... kind of
-			resolvedSrc = src
-		} else {
-			resolvedSrc, err = loader.Load(logger, filesystems, fileURL, originalSpecifier)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		ast, isModule, err := c.Parse(string(resolvedSrc.Data), specifier, true)
-		if err != nil {
-			cache[specifier] = moduleCacheElement{err: err}
-			return nil, err
-		}
-		if !isModule {
-			logger.WithField("specifier", specifier).Error("Not module !!!!!!! TO BE IMPLEMENTED")
-			return nil, fmt.Errorf("NOT MODULE TO BE IMPLEMENTED")
-			// TODO warning
-			// TODO Implement wrapper
-		}
-		m, err := goja.ModuleFromAST(specifier, ast, resolveModule)
-		if err != nil {
-			cache[specifier] = moduleCacheElement{err: err}
-			return nil, err
-		}
-		cache[specifier] = moduleCacheElement{m: m}
-		return m, nil
+	// Make a bundle, instantiate it into a throwaway VM to populate caches.
+	bundle := Bundle{
+		Filename: src.URL,
+		Source:   code,
+		// Program:  pgm,
+		BaseInitContext:   i,
+		RuntimeOptions:    rtOpts,
+		CompatibilityMode: compatMode,
+		exports:           make(map[string]goja.Callable),
+		registry:          registry,
+		cache:             make(map[string]moduleCacheElement),
+		compiler:          c,
 	}
 
-	m, err := resolveModule(nil, src.URL.String())
+	m, err := bundle.resolveModule(nil, src.URL.String())
 	if err != nil {
 		return nil, err
 	}
@@ -168,16 +188,8 @@ func NewBundle(
 		return nil, err
 	}
 	// Make a bundle, instantiate it into a throwaway VM to populate caches.
-	bundle := Bundle{
-		Filename: src.URL,
-		Source:   code,
-		// Program:  pgm,
-		Module:          m,
-		BaseInitContext: i, RuntimeOptions: rtOpts,
-		CompatibilityMode: compatMode,
-		exports:           make(map[string]goja.Callable),
-		registry:          registry,
-	}
+	bundle.Module = m
+
 	if _, err = bundle.instantiate(logger, rt, bundle.BaseInitContext, 0); err != nil {
 		return nil, err
 	}
@@ -214,77 +226,9 @@ func NewBundleFromArchive(
 		CompatibilityMode: compatMode,
 		SourceMapLoader:   generateSourceMapLoader(logger, arc.Filesystems),
 	}
-	pwd := loader.Dir(arc.PwdURL)
 	rt := goja.New()
 	i := NewInitContext(logger, rt, c, compatMode,
 		new(context.Context), arc.Filesystems, arc.PwdURL)
-
-	cache := make(map[string]moduleCacheElement)
-	var resolveModule goja.HostResolveImportedModuleFunc
-	resolveModule = func(_ interface{}, specifier string) (goja.ModuleRecord, error) {
-		// TODO fix
-		fileURL, err := loader.Resolve(pwd, specifier)
-		if err != nil {
-			return nil, err
-		}
-		if specifier == "k6" || strings.HasPrefix(specifier, "k6/") {
-			mod, ok := i.modules[specifier]
-			if !ok {
-				return nil, fmt.Errorf("unknown module: %s", specifier)
-			}
-			k6m, ok := mod.(modules.Module)
-			if !ok {
-				return nil, fmt.Errorf("Unsupported not native module " + specifier)
-			}
-			return wrapModule(k6m), nil
-		}
-		originalSpecifier := specifier
-		specifier = fileURL.String()
-		k, ok := cache[specifier]
-		if ok {
-			return k.m, k.err
-		}
-		var resolvedSrc *loader.SourceData
-		var data []byte
-		if originalSpecifier == arc.Filename {
-			// This mostly exists for tests ... kind of
-			data = arc.Data
-		} else {
-			resolvedSrc, err = loader.Load(logger, arc.Filesystems, fileURL, originalSpecifier)
-			if err != nil {
-				return nil, err
-			}
-			data = resolvedSrc.Data
-		}
-
-		ast, isModule, err := c.Parse(string(data), specifier, true)
-		if err != nil {
-			cache[specifier] = moduleCacheElement{err: err}
-			return nil, err
-		}
-		if !isModule {
-			logger.WithField("specifier", specifier).Error("Not module !!!!!!! TO BE IMPLEMENTED")
-			return nil, fmt.Errorf("NOT MODULE TO BE IMPLEMENTED")
-			// TODO warning
-			// TODO Implement wrapper
-		}
-		m, err := goja.ModuleFromAST(specifier, ast, resolveModule)
-		if err != nil {
-			cache[specifier] = moduleCacheElement{err: err}
-			return nil, err
-		}
-		cache[specifier] = moduleCacheElement{m: m}
-		return m, nil
-	}
-
-	m, err := resolveModule(nil, arc.Filename)
-	if err != nil {
-		return nil, err
-	}
-	err = m.Link()
-	if err != nil {
-		return nil, err
-	}
 
 	env := arc.Env
 	if env == nil {
@@ -299,7 +243,6 @@ func NewBundleFromArchive(
 	bundle := &Bundle{
 		Filename: arc.FilenameURL,
 		Source:   string(arc.Data),
-		Module:   m,
 		// Program:           pgm,
 		Options:           arc.Options,
 		BaseInitContext:   i,
@@ -307,11 +250,21 @@ func NewBundleFromArchive(
 		CompatibilityMode: compatMode,
 		exports:           make(map[string]goja.Callable),
 		registry:          registry,
+		cache:             make(map[string]moduleCacheElement),
+	}
+	m, err := bundle.resolveModule(nil, arc.Filename)
+	if err != nil {
+		return nil, err
+	}
+	err = m.Link()
+	if err != nil {
+		return nil, err
 	}
 
 	if _, err = bundle.instantiate(logger, rt, bundle.BaseInitContext, 0); err != nil {
 		return nil, err
 	}
+	bundle.Module = m
 
 	// Grab exported objects, but avoid overwriting options, which would
 	// be initialized from the metadata.json at this point.
