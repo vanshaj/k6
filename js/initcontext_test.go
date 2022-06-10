@@ -74,18 +74,14 @@ func TestInitContextRequire(t *testing.T) {
 				return
 			}
 
-			exports := bi.Runtime.Get("exports").ToObject(bi.Runtime)
-			if assert.NotNil(t, exports) {
-				_, defaultOk := goja.AssertFunction(exports.Get("default"))
-				assert.True(t, defaultOk, "default export is not a function")
-				assert.Equal(t, "abc123", exports.Get("dummy").String())
-			}
+			_, defaultOk := goja.AssertFunction(bi.ModuleInstance.GetBindingValue(unistring.String("default"), true))
+			assert.True(t, defaultOk, "default export is not a function")
+			assert.Equal(t, "abc123", bi.ModuleInstance.GetBindingValue(unistring.String("dummy"), true).String())
 
-			k6 := bi.Runtime.Get("_k6").ToObject(bi.Runtime)
-			if assert.NotNil(t, k6) {
-				_, groupOk := goja.AssertFunction(k6.Get("group"))
-				assert.True(t, groupOk, "k6.group is not a function")
-			}
+			k6 := bi.ModuleInstance.GetBindingValue("_k6", true).ToObject(bi.Runtime)
+			require.NotNil(t, k6)
+			_, groupOk := goja.AssertFunction(k6.Get("group"))
+			assert.True(t, groupOk, "k6.group is not a function")
 		})
 
 		t.Run("group", func(t *testing.T) {
@@ -102,14 +98,11 @@ func TestInitContextRequire(t *testing.T) {
 			bi, err := b.Instantiate(logger, 0, newModuleVUImpl())
 			require.NoError(t, err)
 
-			exports := bi.Runtime.Get("exports").ToObject(bi.Runtime)
-			if assert.NotNil(t, exports) {
-				_, defaultOk := goja.AssertFunction(exports.Get("default"))
-				assert.True(t, defaultOk, "default export is not a function")
-				assert.Equal(t, "abc123", exports.Get("dummy").String())
-			}
+			_, defaultOk := goja.AssertFunction(bi.ModuleInstance.GetBindingValue(unistring.String("default"), true))
+			assert.True(t, defaultOk, "default export is not a function")
+			assert.Equal(t, "abc123", bi.ModuleInstance.GetBindingValue(unistring.String("dummy"), true).String())
 
-			_, groupOk := goja.AssertFunction(exports.Get("_group"))
+			_, groupOk := goja.AssertFunction(bi.ModuleInstance.GetBindingValue("group", true))
 			assert.True(t, groupOk, "{ group } is not a function")
 		})
 	})
@@ -298,7 +291,7 @@ func TestInitContextOpen(t *testing.T) {
 		bi, err := createAndReadFile(t, "/path/to/file.bin", []byte("hi!\x0f\xff\x01"), 6, "b")
 		require.NoError(t, err)
 		buf := bi.Runtime.NewArrayBuffer([]byte{104, 105, 33, 15, 255, 1})
-		assert.Equal(t, buf, bi.Runtime.Get("data").Export())
+		assert.Equal(t, buf, bi.ModuleInstance.GetBindingValue(unistring.String("data"), false).Export())
 	})
 
 	testdata := map[string]string{

@@ -1208,7 +1208,7 @@ func TestVUIntegrationOpenFunctionError(t *testing.T) {
 	r, err := getSimpleRunner(t, "/script.js", `
 			exports.default = function() { open("/tmp/foo") }
 		`)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	initVU, err := r.NewVU(1, 1, make(chan metrics.SampleContainer, 100))
 	assert.NoError(t, err)

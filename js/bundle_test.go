@@ -290,11 +290,9 @@ func TestNewBundle(t *testing.T) {
 					};
 					export default function() {};
 				`)
-				if assert.NoError(t, err) {
-					if assert.Len(t, b.Options.Stages, 1) {
-						assert.Equal(t, lib.Stage{}, b.Options.Stages[0])
-					}
-				}
+				require.NoError(t, err)
+				require.Len(t, b.Options.Stages, 1)
+				assert.Equal(t, lib.Stage{}, b.Options.Stages[0])
 			})
 			t.Run("Target", func(t *testing.T) {
 				t.Parallel()
@@ -824,7 +822,7 @@ func TestBundleInstantiate(t *testing.T) {
 		bi, err := b.Instantiate(logger, 0, newModuleVUImpl())
 		require.NoError(t, err)
 		// Ensure `options` properties are correctly marshalled
-		jsOptions := bi.Runtime.Get("options").ToObject(bi.Runtime)
+		jsOptions := bi.ModuleInstance.GetBindingValue("options", true).ToObject(bi.Runtime)
 		vus := jsOptions.Get("vus").Export()
 		assert.Equal(t, int64(5), vus)
 		tdt := jsOptions.Get("teardownTimeout").Export()
@@ -834,8 +832,8 @@ func TestBundleInstantiate(t *testing.T) {
 		optOrig := b.Options.VUs
 		b.Options.VUs = null.IntFrom(10)
 		bi2, err := b.Instantiate(logger, 0, newModuleVUImpl())
-		assert.NoError(t, err)
-		jsOptions = bi2.Runtime.Get("options").ToObject(bi2.Runtime)
+		require.NoError(t, err)
+		jsOptions = bi2.ModuleInstance.GetBindingValue("options", true).ToObject(bi2.Runtime)
 		vus = jsOptions.Get("vus").Export()
 		assert.Equal(t, int64(10), vus)
 		b.Options.VUs = optOrig

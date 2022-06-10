@@ -56,4 +56,4 @@ require (
 	google.golang.org/genproto v0.0.0-20200903010400-9bfcb5116336 // indirect
 )
 
-replace github.com/dop251/goja => github.com/mstoykov/goja v0.0.0-20220609080934-c1f7626fcf7d
+replace github.com/dop251/goja => github.com/mstoykov/goja v0.0.0-20220610131529-788e4c0a64d1
