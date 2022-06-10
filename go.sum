@@ -109,8 +109,8 @@ github.com/mccutchen/go-httpbin v1.1.2-0.20190116014521-c5cb2f4802fa h1:lx8ZnNPw
 github.com/mccutchen/go-httpbin v1.1.2-0.20190116014521-c5cb2f4802fa/go.mod h1:fhpOYavp5g2K74XDl/ao2y4KvhqVtKlkg1e+0UaQv7I=
 github.com/mstoykov/envconfig v1.4.1-0.20220114105314-765c6d8c76f1 h1:94EkGmhXrVUEal+uLwFUf4fMXPhZpM5tYxuIsxrCCbI=
 github.com/mstoykov/envconfig v1.4.1-0.20220114105314-765c6d8c76f1/go.mod h1:vk/d9jpexY2Z9Bb0uB4Ndesss1Sr0Z9ZiGUrg5o9VGk=
-github.com/mstoykov/goja v0.0.0-20220610131529-788e4c0a64d1 h1:MtY4PLTZfRf3eNqlfA+srNCY7sgoSo1jjfk6gzOlRkY=
-github.com/mstoykov/goja v0.0.0-20220610131529-788e4c0a64d1/go.mod h1:ZZsaZbVUdvh/jMbHG+sd/IczsHr02rIJwOebNyxkK1I=
+github.com/mstoykov/goja v0.0.0-20220610163400-0f987b8e828c h1:N7+HmnETNgXnZBoSb2HjpW5AjuUkdBWpizQmW1V/k/I=
+github.com/mstoykov/goja v0.0.0-20220610163400-0f987b8e828c/go.mod h1:ZZsaZbVUdvh/jMbHG+sd/IczsHr02rIJwOebNyxkK1I=
 github.com/nu7hatch/gouuid v0.0.0-20131221200532-179d4d0c4d8d h1:VhgPp6v9qf9Agr/56bj7Y/xa04UccTW04VP0Qed4vnQ=
 github.com/nu7hatch/gouuid v0.0.0-20131221200532-179d4d0c4d8d/go.mod h1:YUTz3bUH2ZwIWBy3CJBeOBEugqcmXREj14T+iG/4k4U=
 github.com/nxadm/tail v1.4.4 h1:DQuhQpB1tVlglWS2hLQ5OV6B5r8aGxSrPc5Qo6uTN78=

@@ -102,7 +102,7 @@ func TestInitContextRequire(t *testing.T) {
 			assert.True(t, defaultOk, "default export is not a function")
 			assert.Equal(t, "abc123", bi.ModuleInstance.GetBindingValue(unistring.String("dummy"), true).String())
 
-			_, groupOk := goja.AssertFunction(bi.ModuleInstance.GetBindingValue("group", true))
+			_, groupOk := goja.AssertFunction(bi.ModuleInstance.GetBindingValue("_group", true))
 			assert.True(t, groupOk, "{ group } is not a function")
 		})
 	})
@@ -185,12 +185,12 @@ func TestInitContextRequire(t *testing.T) {
 							)
 
 							constsrc := `export let c = 12345;`
-							assert.NoError(t, fs.MkdirAll(filepath.Dir(constPath), 0o755))
-							assert.NoError(t, afero.WriteFile(fs, constPath, []byte(constsrc), 0o644))
+							require.NoError(t, fs.MkdirAll(filepath.Dir(constPath), 0o755))
+							require.NoError(t, afero.WriteFile(fs, constPath, []byte(constsrc), 0o644))
 						}
 
-						assert.NoError(t, fs.MkdirAll(filepath.Dir(data.LibPath), 0o755))
-						assert.NoError(t, afero.WriteFile(fs, data.LibPath, []byte(jsLib), 0o644))
+						require.NoError(t, fs.MkdirAll(filepath.Dir(data.LibPath), 0o755))
+						require.NoError(t, afero.WriteFile(fs, data.LibPath, []byte(jsLib), 0o644))
 
 						data := fmt.Sprintf(`
 								import fn from "%s";
@@ -200,7 +200,7 @@ func TestInitContextRequire(t *testing.T) {
 						b, err := getSimpleBundle(t, "/path/to/script.js", data, fs)
 						require.NoError(t, err)
 						if constPath != "" {
-							assert.Contains(t, b.BaseInitContext.programs, "file://"+constPath)
+							assert.Contains(t, b.cache, "file://"+constPath)
 						}
 
 						_, err = b.Instantiate(logger, 0, newModuleVUImpl())

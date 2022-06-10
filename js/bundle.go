@@ -124,6 +124,7 @@ func (b *Bundle) resolveModule(ref interface{}, specifier string) (goja.ModuleRe
 		var resolvedsrc *loader.SourceData
 		resolvedsrc, err = loader.Load(b.BaseInitContext.logger, b.BaseInitContext.filesystems, fileurl, originalspecifier)
 		if err != nil {
+			b.cache[specifier] = moduleCacheElement{err: err}
 			return nil, err
 		}
 		data = string(resolvedsrc.Data)
@@ -139,9 +140,12 @@ func (b *Bundle) resolveModule(ref interface{}, specifier string) (goja.ModuleRe
 			"A not module will be evaluated. This might not work great, please don't use commonjs")
 		prg, _, err := b.compiler.Compile(data, specifier, main)
 		if err != nil { // TODO try something on top?
+			b.cache[specifier] = moduleCacheElement{err: err}
 			return nil, err
 		}
-		return wrapCommonJS(prg, main), nil
+		m := wrapCommonJS(prg, main)
+		b.cache[specifier] = moduleCacheElement{m: m}
+		return m, nil
 		// todo warning
 		// todo implement wrapper
 	}
@@ -268,7 +272,7 @@ func NewBundleFromArchive(
 		reverse:           make(map[goja.ModuleRecord]*url.URL),
 		compiler:          c,
 	}
-	m, err := bundle.resolveModule(nil, arc.Filename)
+	m, err := bundle.resolveModule(nil, arc.FilenameURL.String())
 	if err != nil {
 		return nil, err
 	}
@@ -429,7 +433,7 @@ func (b *Bundle) instantiate(
 	initenv := &common.InitEnvironment{
 		Logger:      logger,
 		FileSystems: init.filesystems,
-		CWD:         init.pwd,
+		CWD:         loader.Dir(b.Filename),
 		Registry:    b.registry,
 	}
 	init.moduleVUImpl.initEnv = initenv
@@ -523,14 +527,24 @@ func (w *wrappedCommonJS) Link() error {
 
 func (w *wrappedCommonJS) Evaluate(rt *goja.Runtime) (goja.ModuleInstance, error) {
 	// vu := rt.GlobalObject().Get("vugetter").Export().(vugetter).get() //nolint:forcetypeassert
-	if _, err := rt.RunProgram(w.prg); err != nil {
+	v, err := rt.RunProgram(w.prg)
+	if err != nil {
 		return nil, err
 	}
+	var exports *goja.Object
 	if !w.main {
-		return nil, fmt.Errorf("unsupported require in modules for now")
+		module := rt.NewObject()
+		exports = rt.NewObject()
+		_ = module.Set("exports", exports)
+		call, ok := goja.AssertFunction(v)
+		_ = ok // is always true
+		if _, err = call(exports, module, exports); err != nil {
+			return nil, err
+		}
+	} else {
+		exports = rt.Get("exports").ToObject(rt)
 	}
 
-	exports := rt.Get("exports").ToObject(rt)
 	w.o.Do(func() {
 		w.exportedNames = exports.Keys()
 	})

@@ -242,7 +242,6 @@ func (i *InitContext) requireModule(name string) (goja.Value, error) {
 }
 
 func (i *InitContext) requireFile(name string) (goja.Value, error) {
-	// Resolve the file path, push the target directory as pwd to make relative imports work.
 	pwd := i.pwd
 	fileURL, err := loader.Resolve(pwd, name)
 	if err != nil {
