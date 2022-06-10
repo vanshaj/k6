@@ -384,18 +384,9 @@ func (r *Runner) HandleSummary(ctx context.Context, summary *lib.Summary) (map[s
 		return nil, err
 	}
 
-	handleSummaryFn := goja.Undefined()
-	vFN := vu.ModuleInstance.GetBindingValue(unistring.String("exports"), true)
-	if vFN == nil {
-		return nil, nil
-	}
-	if exported := vFN.ToObject(vu.Runtime); exported != nil {
-		fn := exported.Get(consts.HandleSummaryFn)
-		if _, ok := goja.AssertFunction(fn); ok {
-			handleSummaryFn = fn
-		} else if fn != nil {
-			return nil, fmt.Errorf("exported identifier %s must be a function", consts.HandleSummaryFn)
-		}
+	fn := vu.ModuleInstance.GetBindingValue(unistring.String("handleSummary"), true)
+	if _, ok := goja.AssertFunction(fn); !ok {
+		return nil, fmt.Errorf("exported identifier %s must be a function", consts.HandleSummaryFn)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, r.getTimeoutFor(consts.HandleSummaryFn))
@@ -417,7 +408,7 @@ func (r *Runner) HandleSummary(ctx context.Context, summary *lib.Summary) (map[s
 	}
 
 	wrapperArgs := []goja.Value{
-		handleSummaryFn,
+		fn,
 		vu.Runtime.ToValue(r.Bundle.RuntimeOptions.SummaryExport.String),
 		vu.Runtime.ToValue(summaryDataForJS),
 	}
