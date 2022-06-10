@@ -385,10 +385,11 @@ func (r *Runner) HandleSummary(ctx context.Context, summary *lib.Summary) (map[s
 	}
 
 	fn := vu.ModuleInstance.GetBindingValue(unistring.String("handleSummary"), true)
-	if _, ok := goja.AssertFunction(fn); !ok {
-		return nil, fmt.Errorf("exported identifier %s must be a function", consts.HandleSummaryFn)
+	if fn != nil {
+		if _, ok := goja.AssertFunction(fn); !ok {
+			return nil, fmt.Errorf("exported identifier %s must be a function", consts.HandleSummaryFn)
+		}
 	}
-
 	ctx, cancel := context.WithTimeout(ctx, r.getTimeoutFor(consts.HandleSummaryFn))
 	defer cancel()
 	go func() {
