@@ -791,7 +791,7 @@ func (c *compiler) compileExportDeclaration(expr *ast.ExportDeclaration) {
 				List: []*ast.Binding{
 					{
 						Target: &ast.Identifier{
-							Name: unistring.String("*default*"),
+							Name: unistring.String("default"),
 							Idx:  h.FunctionLiteral.Idx0(),
 						},
 						Initializer: h.FunctionLiteral,
@@ -809,6 +809,20 @@ func (c *compiler) compileExportDeclaration(expr *ast.ExportDeclaration) {
 				}})
 			*/
 		}
+	} else if assign := expr.AssignExpression; assign != nil {
+		c.compileLexicalDeclaration(&ast.LexicalDeclaration{
+			Idx:   assign.Idx0(),
+			Token: token.CONST,
+			List: []*ast.Binding{
+				{
+					Target: &ast.Identifier{
+						Name: unistring.String("default"),
+						Idx:  assign.Idx0(),
+					},
+					Initializer: assign,
+				},
+			},
+		})
 	}
 	// TODO
 }

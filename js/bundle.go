@@ -136,8 +136,8 @@ func (b *Bundle) resolveModule(ref interface{}, specifier string) (goja.ModuleRe
 		return nil, err
 	}
 	if !ismodule {
-		b.BaseInitContext.logger.WithField("specifier", specifier).Error(
-			"A not module will be evaluated. This might not work great, please don't use commonjs")
+		// b.BaseInitContext.logger.WithField("specifier", specifier).Error(
+		// "A not module will be evaluated. This might not work great, please don't use commonjs")
 		prg, _, err := b.compiler.Compile(data, specifier, main)
 		if err != nil { // TODO try something on top?
 			b.cache[specifier] = moduleCacheElement{err: err}
