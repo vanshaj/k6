@@ -154,6 +154,7 @@ func TestRunnerOptions(t *testing.T) {
 
 func TestOptionsSettingToScript(t *testing.T) {
 	t.Parallel()
+	t.Skip("This no longer can work with modules, we can have it only for scripts if we desire")
 
 	optionVariants := []string{
 		"",
