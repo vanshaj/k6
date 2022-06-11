@@ -674,7 +674,7 @@ export default function () {
 	require.ErrorAs(t, err, &exception)
 	// TODO figure out why those are not the same as the one in the previous test TestSourceMapsExternal
 	// likely settings in the transpilers
-	require.Equal(t, "cool is cool\n\tat webpack:///./test1.ts:2:4(2)\n\tat r (webpack:///./test1.ts:5:4(3))\n\tat file:///script.js:4:2(4)\n\tat native\n", exception.String())
+	require.Equal(t, "cool is cool\n\tat webpack:///./test1.ts:2:4(2)\n\tat r (webpack:///./test1.ts:5:4(3))\n\tat default file:///script.js:4:2(4)\n\tat native\n", exception.String())
 }
 
 func TestSourceMapsExternalExtentedInlined(t *testing.T) {
