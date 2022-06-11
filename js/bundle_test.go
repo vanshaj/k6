@@ -771,6 +771,7 @@ func TestBundleInstantiate(t *testing.T) {
 
 	t.Run("SetAndRun", func(t *testing.T) {
 		t.Parallel()
+		t.Skip("This should've never been a thing we wanted to have")
 		b, err := getSimpleBundle(t, "/script.js", `
 		export let options = {
 			vus: 5,
