@@ -452,9 +452,6 @@ func (b *Bundle) instantiate(
 	var err error
 	err = common.RunWithPanicCatching(logger, rt, func() error {
 		return init.moduleVUImpl.eventLoop.Start(func() error {
-			/*
-				_, errRun := rt.RunProgram(b.Program)
-			*/
 			var errRun error
 			mi, errRun = b.Module.Evaluate(rt)
 			return errRun

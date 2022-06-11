@@ -529,7 +529,6 @@ func TestNewBundleFromArchive(t *testing.T) {
 
 		checkArchive(t, arc, lib.RuntimeOptions{}, "") // default options
 		checkArchive(t, arc, extCompatModeRtOpts, "")
-		checkArchive(t, arc, baseCompatModeRtOpts, "Unexpected reserved word")
 	})
 
 	t.Run("es6_script_explicit", func(t *testing.T) {
@@ -540,7 +539,6 @@ func TestNewBundleFromArchive(t *testing.T) {
 
 		checkArchive(t, arc, lib.RuntimeOptions{}, "")
 		checkArchive(t, arc, extCompatModeRtOpts, "")
-		checkArchive(t, arc, baseCompatModeRtOpts, "Unexpected reserved word")
 	})
 
 	t.Run("es5_script_with_extended", func(t *testing.T) {
@@ -565,13 +563,6 @@ func TestNewBundleFromArchive(t *testing.T) {
 		checkArchive(t, arc, baseCompatModeRtOpts, "")
 	})
 
-	t.Run("es6_archive_with_wrong_compat_mode", func(t *testing.T) {
-		t.Parallel()
-		arc, err := getArchive(t, es6Code, baseCompatModeRtOpts)
-		require.Error(t, err)
-		require.Nil(t, arc)
-	})
-
 	t.Run("messed_up_archive", func(t *testing.T) {
 		t.Parallel()
 		arc, err := getArchive(t, es6Code, extCompatModeRtOpts)
@@ -579,7 +570,6 @@ func TestNewBundleFromArchive(t *testing.T) {
 		arc.CompatibilityMode = "blah"                                           // intentionally break the archive
 		checkArchive(t, arc, lib.RuntimeOptions{}, "invalid compatibility mode") // fails when it uses the archive one
 		checkArchive(t, arc, extCompatModeRtOpts, "")                            // works when I force the compat mode
-		checkArchive(t, arc, baseCompatModeRtOpts, "Unexpected reserved word")   // failes because of ES6
 	})
 
 	t.Run("script_options_dont_overwrite_metadata", func(t *testing.T) {
