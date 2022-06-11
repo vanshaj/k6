@@ -130,7 +130,7 @@ func TestInitContextRequire(t *testing.T) {
 			assert.NoError(t, afero.WriteFile(fs, "/file.js", []byte(`throw new Error("aaaa")`), 0o755))
 			_, err := getSimpleBundle(t, "/script.js", `import "/file.js"; export default function() {}`, fs)
 			assert.EqualError(t, err,
-				"Error: aaaa\n\tat file:///file.js:2:7(3)\n\tat go.k6.io/k6/js.(*InitContext).Require-fm (native)\n\tat file:///script.js:1:0(14)\n")
+				"Error: aaaa\n\tat file:///file.js:2:7(3)\n\tat native\n")
 		})
 
 		imports := map[string]struct {
