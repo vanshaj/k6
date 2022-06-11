@@ -492,7 +492,7 @@ func TestRunnerIntegrationImports(t *testing.T) {
 			mod := mod
 			t.Run(mod, func(t *testing.T) {
 				t.Run("Source", func(t *testing.T) {
-					_, err := getSimpleRunner(t, "/script.js", fmt.Sprintf(`import "%s"; exports.default = function() {}`, mod), rtOpts)
+					_, err := getSimpleRunner(t, "/script.js", fmt.Sprintf(`import "%s"; export default function() {}`, mod), rtOpts)
 					assert.NoError(t, err)
 				})
 			})
