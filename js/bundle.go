@@ -558,7 +558,13 @@ func (w *wrappedCommonJS) Evaluate(rt *goja.Runtime) (goja.ModuleInstance, error
 	w.o.Do(func() {
 		w.exportedNames = exports.Keys()
 	})
-	return &wrappedCommonJSInstance{rt: rt, exports: exports, w: w}, nil // TODO fix
+	__esModule := exports.Get("__esModule")
+	return &wrappedCommonJSInstance{
+		rt:               rt,
+		exports:          exports,
+		w:                w,
+		isEsModuleMarked: __esModule != nil && __esModule.ToBoolean(),
+	}, nil // TODO fix
 }
 
 func (w wrappedCommonJS) GetExportedNames(set ...*goja.SourceTextModuleRecord) []string {
@@ -578,15 +584,16 @@ func (w *wrappedCommonJS) ResolveExport(
 }
 
 type wrappedCommonJSInstance struct {
-	exports *goja.Object
-	rt      *goja.Runtime
-	w       *wrappedCommonJS
+	exports          *goja.Object
+	rt               *goja.Runtime
+	w                *wrappedCommonJS
+	isEsModuleMarked bool
 }
 
 func (wmi *wrappedCommonJSInstance) GetBindingValue(name unistring.String, _ bool) goja.Value {
 	n := name.String()
 	if n == "default" {
-		if wmi.w.main { // hack for just hte main file as it worked like that before :facepalm:
+		if wmi.w.main || wmi.isEsModuleMarked { // hack for just hte main file as it worked like that before :facepalm:
 			d := wmi.exports.Get("default")
 			if d != nil {
 				return d
