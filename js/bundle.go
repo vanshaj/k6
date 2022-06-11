@@ -381,13 +381,21 @@ func (b *Bundle) Instantiate(
 	}
 
 	for _, name := range b.Module.GetExportedNames() {
-		v := mi.GetBindingValue(unistring.String(name), false)
+		v := mi.GetBindingValue(unistring.String(name), true)
 		fn, ok := goja.AssertFunction(v)
 		if ok {
 			bi.exports[name] = fn
 		}
 	}
-
+	jsOptions := mi.GetBindingValue(unistring.String(consts.Options), true)
+	if !(jsOptions == nil || goja.IsNull(jsOptions) || goja.IsUndefined(jsOptions)) {
+		jsOptionsObj := jsOptions.ToObject(rt)
+		b.Options.ForEachSpecified("json", func(key string, val interface{}) {
+			if err := jsOptionsObj.Set(key, val); err != nil {
+				instErr = err
+			}
+		})
+	}
 	return bi, instErr
 }
 
