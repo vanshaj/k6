@@ -167,11 +167,6 @@ func TestNewBundle(t *testing.T) {
 					"InvalidCompat", "es1", `export default function() {};`,
 					`invalid compatibility mode "es1". Use: "extended", "base"`,
 				},
-				// ES2015 modules are not supported
-				{
-					"Modules", "base", `export default function() {};`,
-					"file:///script.js: Line 1:1 Unexpected reserved word",
-				},
 				// BigInt is not supported
 				{
 					"BigInt", "base",
