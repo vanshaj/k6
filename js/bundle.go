@@ -546,6 +546,7 @@ func (w *wrappedCommonJS) Evaluate(rt *goja.Runtime) (goja.ModuleInstance, error
 		if _, err = call(exports, module, exports); err != nil {
 			return nil, err
 		}
+		exports = module.Get("exports").ToObject(rt)
 	} else {
 		exp := rt.Get("exports")
 		if !goja.IsNull(exp) {
