@@ -138,6 +138,7 @@ func TestLoadOnceGlobalVars(t *testing.T) {
 
 func TestLoadExportsIsUsableInModule(t *testing.T) {
 	t.Parallel()
+	t.Skip("This likely shouldn't have had a test and should not be supported")
 	fs := afero.NewMemMapFs()
 	require.NoError(t, afero.WriteFile(fs, "/A.js", []byte(`
 		export function A() {
