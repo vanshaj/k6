@@ -282,6 +282,42 @@ func TestSSLKEYLOGFILE(t *testing.T) {
 	require.Regexp(t, "^CLIENT_[A-Z_]+ [0-9a-f]+ [0-9a-f]+\n", string(sslloglines))
 }
 
+func TestThresholdDeprecationWarnings(t *testing.T) {
+	t.Parallel()
+
+	// TODO: adjust this test after we actually make url, error, iter and vu non-indexable
+
+	ts := newGlobalTestState(t)
+	ts.args = []string{"k6", "run", "--system-tags", "url,error,vu,iter", "-"}
+	ts.stdIn = bytes.NewReader([]byte(`
+		export const options = {
+			thresholds: {
+				'http_req_duration{url:https://test.k6.io}': ['p(95)<500', 'p(99)<1000'],
+				'http_req_duration{error:foo}': ['p(99)<1000'],
+				'iterations{vu:1,iter:0}': ['count == 1'],
+			},
+		};
+
+		export default function () { }`,
+	))
+
+	newRootCommand(ts.globalState).execute()
+
+	logs := ts.loggerHook.Drain()
+	assert.True(t, testutils.LogContains(logs, logrus.WarnLevel,
+		"The 'http_req_duration{url:https://test.k6.io}' threshold is defined based on the 'url' metric tag",
+	))
+	assert.True(t, testutils.LogContains(logs, logrus.WarnLevel,
+		"Thresholds that are based on the 'error' metric tag will be deprecated in the future. Please use the 'error_code'",
+	))
+	assert.True(t, testutils.LogContains(logs, logrus.WarnLevel,
+		"Thresholds like 'iterations{vu:1,iter:0}' that are based on the 'vu' metric will be deprecated",
+	))
+	assert.True(t, testutils.LogContains(logs, logrus.WarnLevel,
+		"Thresholds like 'iterations{vu:1,iter:0}' that are based on the 'iter' metric will be deprecated",
+	))
+}
+
 // TODO: add a hell of a lot more integration tests, including some that spin up
 // a test HTTP server and actually check if k6 hits it
 

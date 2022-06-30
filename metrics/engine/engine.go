@@ -90,6 +90,41 @@ func (me *MetricsEngine) getThresholdMetricOrSubmetric(name string) (*metrics.Me
 	if err != nil {
 		return nil, err
 	}
+
+	if sm.Metric.Observed {
+		// Do not repeat warnings for the same sub-metrics
+		return sm.Metric, nil
+	}
+
+	// TODO: reword these from "will be deprecated" to "were deprecated" and
+	// maybe make them errors, not warnings, when we introduce un-indexable tags
+
+	if _, ok := sm.Tags.Get("url"); ok {
+		me.logger.Warnf(
+			"The '%s' threshold is defined based on the 'url' metric tag. This might lead to bugs and the 'name'"+
+				" tag should be used instead. See URL grouping (https://k6.io/docs/using-k6/http-requests/#url-grouping)"+
+				" in the docs for an explanation why. Thresholds with a 'url' tag will probably be deprecated in the future.", name,
+		)
+	}
+
+	if _, ok := sm.Tags.Get("error"); ok {
+		me.logger.Warnf(
+			"Thresholds that are based on the 'error' metric tag will be deprecated in the future."+
+				" Please use the 'error_code' tag in the '%s' threshold instead.", name,
+		)
+	}
+	if _, ok := sm.Tags.Get("vu"); ok {
+		me.logger.Warnf(
+			"Thresholds like '%s' that are based on the 'vu' metric will be deprecated and won't work in the future.", name,
+		)
+	}
+
+	if _, ok := sm.Tags.Get("iter"); ok {
+		me.logger.Warnf(
+			"Thresholds like '%s' that are based on the 'iter' metric will be deprecated and won't work in the future.", name,
+		)
+	}
+
 	return sm.Metric, nil
 }
 
