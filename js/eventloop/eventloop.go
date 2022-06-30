@@ -61,11 +61,17 @@ func (e *EventLoop) wakeup() {
 // This function *must* be called from within running on the event loop, but its result can be called from anywhere.
 func (e *EventLoop) RegisterCallback() func(func() error) {
 	e.lock.Lock()
+	var done bool
 	e.registeredCallbacks++
 	e.lock.Unlock()
 
 	return func(f func() error) {
 		e.lock.Lock()
+		if done { // this is protected by the lock on the event loop
+			e.lock.Unlock() // let not lock up the whole event loop, somebody could recover from the panic
+			panic("RegisterCallback called twice")
+		}
+		done = true
 		e.queue = append(e.queue, f)
 		e.registeredCallbacks--
 		e.lock.Unlock()
